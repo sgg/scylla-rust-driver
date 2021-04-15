@@ -15,7 +15,7 @@ pub struct Node {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub struct Token {
-    pub value: i64,
+    pub value: i128,
 }
 
 pub type Shard = u32;
@@ -36,7 +36,7 @@ impl std::str::FromStr for Token {
 
 pub fn murmur3_token(pk: Bytes) -> Token {
     Token {
-        value: hash3_x64_128(&pk) as i64,
+        value: hash3_x64_128(&pk) as _,
     }
 }
 
