@@ -3,7 +3,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::lookup_host;
-use tracing::warn;
+use tracing::{trace, warn};
 use uuid::Uuid;
 
 use super::errors::{BadQuery, NewSessionError, QueryError};
@@ -245,11 +245,13 @@ impl Session {
             };
         }
 
+        trace!("Resolving known nodes...");
         let resolve_futures = to_resolve.into_iter().map(resolve_hostname);
         let resolved: Vec<SocketAddr> = futures::future::try_join_all(resolve_futures).await?;
 
         node_addresses.extend(resolved);
 
+        trace!("Connecting to cluster...");
         // Start the session
         let cluster = Cluster::new(&node_addresses, config.get_connection_config()).await?;
         let metrics = Arc::new(Metrics::new());

@@ -1,4 +1,5 @@
 use super::Consistency;
+use std::fmt;
 use crate::transport::retry_policy::RetryPolicy;
 
 /// CQL query statement.
@@ -135,5 +136,17 @@ impl Clone for Query {
                 .map(|policy| policy.clone_boxed()),
             tracing: self.tracing,
         }
+    }
+}
+
+impl fmt::Debug for Query {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Query")
+            .field("contents", &self.contents)
+            .field("page_size", &self.page_size)
+            .field("consistency", &self.consistency)
+            .field("serial_consistency", &self.serial_consistency)
+            .field("is_idempotent", &self.is_idempotent)
+            .finish()
     }
 }

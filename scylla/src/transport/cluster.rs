@@ -8,6 +8,7 @@ use crate::transport::topology::{Keyspace, TopologyInfo, TopologyReader};
 use futures::future::join_all;
 use futures::{future::RemoteHandle, FutureExt};
 use itertools::Itertools;
+use tracing::trace;
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -105,6 +106,7 @@ impl Cluster {
             _worker_handle: worker_handle,
         };
 
+        trace!("Refreshing topology...");
         result.refresh_topology().await?;
 
         Ok(result)
@@ -321,6 +323,7 @@ impl ClusterWorker {
 
             // Perform the refresh
             last_refresh_time = Instant::now();
+            trace!("Performing refresh...");
             let refresh_res = self.perform_refresh().await;
 
             // Send refresh result if there was a request
@@ -384,7 +387,10 @@ impl ClusterWorker {
 
     async fn perform_refresh(&mut self) -> Result<(), QueryError> {
         // Read latest TopologyInfo
+        trace!("Reading topology info...");
         let topo_info = self.topology_reader.read_topology_info().await?;
+
+        trace!("Loading cluster data...");
         let cluster_data: Arc<ClusterData> = self.cluster_data.read().unwrap().clone();
 
         let mut new_cluster_data = Arc::new(ClusterData::new(

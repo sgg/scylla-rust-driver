@@ -60,3 +60,6 @@ path = "cql-time-types.rs"
 name = "tracing"
 path = "tracing.rs"
 
+[[example]]
+name = "partitioner"
+path = "partitioner.rs"

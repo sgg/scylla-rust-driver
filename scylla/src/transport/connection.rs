@@ -3,7 +3,7 @@ use futures::{future::RemoteHandle, FutureExt};
 use tokio::io::{split, AsyncRead, AsyncWrite};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, warn};
+use tracing::{error, trace, warn};
 use uuid::Uuid;
 
 #[cfg(feature = "ssl")]
@@ -270,8 +270,8 @@ impl Connection {
         values: impl ValueList,
         paging_state: Option<Bytes>,
     ) -> Result<QueryResponse, QueryError> {
+        tracing::trace!(query = ?query, "Executing query");
         let serialized_values = values.serialized()?;
-
         let query_frame = query::Query {
             contents: query.get_contents().to_owned(),
             parameters: query::QueryParameters {
@@ -432,11 +432,13 @@ impl Connection {
         };
         let body_with_ext = RequestBodyWithExtensions { body };
 
+        trace!(opcode = ?R::OPCODE, compress = compress, tracing = tracing, "Preparing request");
         let (flags, raw_request) =
             frame::prepare_request_body_with_extensions(body_with_ext, compression, tracing)?;
 
         let (sender, receiver) = oneshot::channel();
 
+        trace!("Dispatching request");
         self.submit_channel
             .send(Task {
                 request_flags: flags,
@@ -458,6 +460,8 @@ impl Connection {
                 "Connection broken",
             )))
         })??;
+
+        trace!("Received response");
         let body_with_ext = frame::parse_response_body_extensions(
             task_response.params.flags,
             self.config.compression,
@@ -468,6 +472,7 @@ impl Connection {
             warn!(warning = warn_description.as_str());
         }
 
+        trace!("Deserializing response");
         let response = Response::deserialize(task_response.opcode, &mut &*body_with_ext.body)?;
 
         Ok(QueryResponse {
@@ -637,6 +642,7 @@ impl Connection {
                 ..Default::default()
             };
 
+            trace!(stream_id = stream_id, "Writing request frame");
             frame::write_request_frame(
                 &mut write_half,
                 params,
@@ -644,6 +650,7 @@ impl Connection {
                 task.request_body,
             )
             .await?;
+            trace!(stream_id = stream_id, "Successfully wrote request frame")
         }
 
         Ok(())

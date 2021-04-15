@@ -4,6 +4,7 @@
 pub mod macros;
 
 pub mod frame;
+pub mod partitioner;
 pub mod routing;
 pub mod statement;
 pub mod tracing;

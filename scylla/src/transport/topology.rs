@@ -7,6 +7,7 @@ use crate::transport::session::IntoTypedRows;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
+use tracing::trace;
 
 /// Allows to read current topology info from the cluster
 pub struct TopologyReader {
@@ -131,12 +132,26 @@ async fn query_topology_info(
     conn_keeper: &ConnectionKeeper,
     connect_port: u16,
 ) -> Result<TopologyInfo, QueryError> {
+    trace!("Querying topology info...");
     let conn: &Connection = &*conn_keeper.get_connection().await?;
 
     let peers_query = query_peers(conn, connect_port);
+
     let keyspaces_query = query_keyspaces(conn);
 
+    // FIXME(hack) do these serially so we can disambiguate failures
+    trace!("Loading peers");
+    let peers = peers_query.await?;
+    trace!("Successfully loaded peers");
+
+    trace!("Loading keyspaces");
+    let keyspaces = keyspaces_query.await?;
+    trace!("Successfully loaded keyspaces");
+
+    /*
+    trace!("Loading peers and keyspaces...");
     let (peers, keyspaces) = tokio::try_join!(peers_query, keyspaces_query)?;
+    */
 
     // There must be at least one peer
     if peers.is_empty() {
@@ -152,6 +167,8 @@ async fn query_topology_info(
         ));
     }
 
+    trace!("Loaded topology info!");
+
     Ok(TopologyInfo { peers, keyspaces })
 }
 
@@ -166,7 +183,9 @@ async fn query_peers(conn: &Connection, connect_port: u16) -> Result<Vec<Peer>, 
         &[],
     );
 
+    trace!("Querying for peers");
     let (peers_res, local_res) = tokio::try_join!(peers_query, local_query)?;
+    trace!("Successfully retrieved peer metadata");
 
     let peers_rows = peers_res.rows.ok_or(QueryError::ProtocolError(
         "system.peers query response was not Rows",
@@ -192,6 +211,13 @@ async fn query_peers(conn: &Connection, connect_port: u16) -> Result<Vec<Peer>, 
         let (ip_address, datacenter, rack, tokens) = row.map_err(|_| {
             QueryError::ProtocolError("system.peers or system.local has invalid column type")
         })?;
+        trace!(
+            ip_address = %ip_address,
+            datacenter = ?datacenter,
+            rack = ?rack,
+            tokens = ?tokens,
+            "Found peer",
+        );
 
         let tokens_str: Vec<String> = tokens.unwrap_or_default();
 
@@ -216,6 +242,8 @@ async fn query_peers(conn: &Connection, connect_port: u16) -> Result<Vec<Peer>, 
 }
 
 async fn query_keyspaces(conn: &Connection) -> Result<HashMap<String, Keyspace>, QueryError> {
+    trace!("Loading keyspaces...");
+
     let rows = conn
         .query_single_page(
             "select keyspace_name, toJson(replication) from system_schema.keyspaces",
@@ -227,15 +255,21 @@ async fn query_keyspaces(conn: &Connection) -> Result<HashMap<String, Keyspace>,
             "system_schema.keyspaces query response was not Rows",
         ))?;
 
+    trace!("Loaded {} rows.", rows.len());
+    tokio::time::sleep(std::time::Duration::from_secs(1));
+
     let mut result = HashMap::with_capacity(rows.len());
 
+    trace!("Deserializing keyspace metadata...");
     for row in rows.into_typed::<(String, String)>() {
         let (keyspace_name, keyspace_json_text) = row.map_err(|_| {
             QueryError::ProtocolError("system_schema.keyspaces has invalid column type")
         })?;
+        trace!(keyspace_name = ?keyspace_name, "Loading metadata for keyspace");
 
         let strategy_map: HashMap<String, String> = json_to_string_map(&keyspace_json_text)?;
 
+        trace!(keyspace_name = ?keyspace_name, "Parsing strategy");
         let strategy: Strategy = strategy_from_string_map(strategy_map)?;
 
         result.insert(keyspace_name, Keyspace { strategy });
@@ -243,6 +277,26 @@ async fn query_keyspaces(conn: &Connection) -> Result<HashMap<String, Keyspace>,
 
     Ok(result)
 }
+
+async fn query_cluster_partitioner(conn: &Connection) -> Result<(), QueryError> {
+    let mut rows = conn
+        .query_single_page("select partitioner from system.local where key = 'local", &[])
+        .await?
+        .rows
+        .ok_or(QueryError::ProtocolError(
+            "system.local query response was not in Rows"
+        ))?;
+
+    let (partitioner_name,) = rows
+        .pop()
+        .ok_or_else(|| QueryError::ProtocolError("system.local has no rows"))?
+        .into_typed::<(String,)>()
+        .map_err(|e| QueryError::ProtocolError("column `partitioner` in system.local has invalid type"))?;
+
+
+    unimplemented!("WIP");
+}
+
 
 fn json_to_string_map(json_text: &str) -> Result<HashMap<String, String>, QueryError> {
     use serde_json::Value;
